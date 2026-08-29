@@ -20,7 +20,7 @@ already matches your file.
 NF Insurance CSV  ->  drop in "inbox"  ->  run 2_daily_import.py  ->  SQLite database
                                                                         |
    fill in Office / Billing Date / Payment Received / Expense Case #     |
-                  / Discrepancy   <--  DB Browser for SQLite             |
+                  / Payment Due   <--  DB Browser for SQLite             |
                                                                         |
                              reports/dashboards  <--  Power BI or Excel
 ```
@@ -37,7 +37,7 @@ The database has **one table, `nf_insurance_log`**, with exactly **nine columns*
 | **Insurance Paid** | the CSV — cell AR (amount) |
 | **Payment Received** | you fill in later |
 | **Expense Case Number** | you fill in later |
-| **Discrepancy** | you fill in later |
+| **Payment Due** | you fill in later |
 
 Re-importing the same file is always safe: prescriptions already loaded are
 skipped, and anything you typed in by hand is never overwritten.
@@ -49,11 +49,12 @@ skipped, and anything you typed in by hand is never overwritten.
 | File | What it's for |
 |---|---|
 | `scripts/config.py` | The **only** file you normally edit (paths). |
+| `scripts/1_backfill_from_excel.py` | Run **once** to load history from the old "📋 Daily Log" sheet (exported to CSV). |
 | `scripts/2_daily_import.py` | Run to load an NF Insurance CSV export. |
 | `scripts/3_export_for_powerbi.py` | Optional — dumps the 9 columns to a CSV for Power BI/Excel. |
 | `scripts/pharmacy_common.py` | Shared engine — do **not** edit. |
-| `scripts/1_backfill_from_excel.py` | Not used in this workflow (leftover from the old pipeline). |
-| `sample_data/NF Ins Test.csv` | A sample export so you can practice safely first. |
+| `sample_data/NF Ins Test.csv` | A sample daily export so you can practice safely first. |
+| `sample_data/PrimeRx_Patient_Tracker ... 📋 Daily Log.csv` | A sample backfill source. |
 
 ---
 
@@ -114,7 +115,23 @@ INBOX_DIR = BASE_DIR / "inbox"
 
 Save and close.
 
-### Step 5 — Turn on disk encryption (BitLocker)
+### Step 5 — Load the history (run the backfill ONCE)
+
+If you have history in the old Excel tracker, open its **"📋 Daily Log"** sheet
+and **Save As → CSV**. Set `BACKFILL_FILE` in `config.py` to point at that file,
+then:
+
+```
+cd C:\PharmacyLogDB\scripts
+python 1_backfill_from_excel.py
+```
+
+It reads the **Patient Name / RX # / Drug / Qty / Office Location** columns
+(everything else on that sheet is ignored), using each `Log Date:` row to date
+the rows beneath it. Run this **before** you start daily imports. It's safe to
+re-run — existing rows only get their blank cells topped up.
+
+### Step 6 — Turn on disk encryption (BitLocker)
 
 Because the database holds PHI, encrypt the drive:
 
@@ -149,13 +166,13 @@ Setup done.
 The import fills **Name / Drug / Quantity / Insurance Paid** from the CSV
 (cells AJ / AK / AM / AR). The other five columns start blank for your team to
 fill in: **Office, Billing Date, Payment Received, Expense Case Number,
-Discrepancy.**
+Payment Due.**
 
 1. Install **DB Browser for SQLite** (free) from **https://sqlitebrowser.org**.
 2. Open it → **Open Database** → pick `C:\PharmacyLogDB\pharmacy.db`.
 3. Go to the **Browse Data** tab → choose the **nf_insurance_log** table.
 4. Click a cell in **office / billing_date / payment_received /
-   expense_case_number / discrepancy** and type.
+   expense_case_number / payment_due** and type.
 5. Click **Write Changes** to save.
 
 Because imports never overwrite existing rows, you can enrich a prescription

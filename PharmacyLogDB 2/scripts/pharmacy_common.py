@@ -35,13 +35,11 @@ def get_connection():
 
 def ensure_schema(conn):
     """Creates the table from config.ALL_FIELDS if it doesn't exist yet.
-    Columns are created in ALL_FIELDS order; manual fields get a blank
-    default. rx_number + filled_date are hidden bookkeeping columns used
-    only as the de-dup key."""
-    col_defs = []
-    for col, _ in config.ALL_FIELDS:
-        default = " DEFAULT ''" if col in config.MANUAL_FIELD_NAMES else ""
-        col_defs.append(f"{col} TEXT{default}")
+    Columns are created in ALL_FIELDS order; every column defaults to ''
+    so a field a given import doesn't supply reads as blank, not NULL.
+    rx_number + filled_date are hidden bookkeeping columns used only as
+    the de-dup key."""
+    col_defs = [f"{col} TEXT DEFAULT ''" for col, _ in config.ALL_FIELDS]
     body = ",\n            ".join(col_defs)
     conn.execute(
         f"""
@@ -88,6 +86,17 @@ def extract_date_key(date_text):
     return raw
 
 
+def _clean_number(text):
+    """'250.00' -> '250', '1,892.20' -> '1892.2', '' -> ''. Leaves
+    anything that isn't a number untouched."""
+    raw = (text or "").strip()
+    try:
+        value = float(raw.replace(",", ""))
+    except ValueError:
+        return raw
+    return str(int(value)) if value.is_integer() else str(value)
+
+
 # ---------------------------------------------------------------------
 # Inserting rows (dedup-safe, manual-field-preserving)
 # ---------------------------------------------------------------------
@@ -122,6 +131,53 @@ def insert_from_csv(conn, rows, source_file):
             new_count += 1
     conn.commit()
     return new_count
+
+
+_BACKFILL_COLS = ["name", "drug", "quantity", "office"]
+
+
+def insert_backfill(conn, rows, source_file):
+    """One-time history load from the old tracker export. Writes only the
+    columns that export provides (name, drug, quantity, office). New rows
+    are inserted; for a row that already exists (same rx_number +
+    filled_date) only columns that are still blank get filled, so
+    daily-import data and hand-typed edits are never overwritten.
+    Returns (new_row_count, existing_rows_filled_count)."""
+    fill_cols = [c for c in _BACKFILL_COLS if c in {col for col, _ in config.ALL_FIELDS}]
+    insert_cols = fill_cols + ["rx_number", "filled_date", "source_file", "imported_at"]
+    placeholders = ", ".join("?" for _ in insert_cols)
+    update_clause = ", ".join(
+        f"{c} = CASE WHEN TRIM(COALESCE({config.TABLE_NAME}.{c}, '')) = '' "
+        f"THEN excluded.{c} ELSE {config.TABLE_NAME}.{c} END"
+        for c in fill_cols
+    )
+    select_sql = (
+        f"SELECT {', '.join(fill_cols)} FROM {config.TABLE_NAME} "
+        f"WHERE rx_number = ? AND filled_date = ?"
+    )
+    now = datetime.now().isoformat(timespec="seconds")
+
+    new_count = 0
+    filled_count = 0
+    for row in rows:
+        key = (row.get("rx_number", ""), row.get("filled_date", ""))
+        before = conn.execute(select_sql, key).fetchone()
+        values = [row.get(c, "") for c in fill_cols] + [key[0], key[1], source_file, now]
+        conn.execute(
+            f"""
+            INSERT INTO {config.TABLE_NAME} ({', '.join(insert_cols)})
+            VALUES ({placeholders})
+            ON CONFLICT(rx_number, filled_date) DO UPDATE SET
+                {update_clause}
+            """,
+            values,
+        )
+        if before is None:
+            new_count += 1
+        elif tuple(before) != tuple(conn.execute(select_sql, key).fetchone()):
+            filled_count += 1
+    conn.commit()
+    return new_count, filled_count
 
 
 # ---------------------------------------------------------------------
@@ -166,6 +222,64 @@ def read_nf_ins_csv(path):
 
         record = {k: v for k, v in raw_record.items() if not k.startswith("_")}
         record["filled_date"] = extract_date_key(record.get("filled_date", ""))
+        rows.append(record)
+
+    return rows
+
+
+# ---------------------------------------------------------------------
+# CSV parsing (old Excel "Daily Log" sheet export — one-time backfill)
+# ---------------------------------------------------------------------
+
+def read_backfill_csv(path):
+    """Returns a list of dicts from a CSV export of the old tracker's
+    "📋 Daily Log" sheet. Each dict has the model columns that sheet
+    supplies (name, drug, quantity, office) plus rx_number and
+    filled_date for the de-dup key.
+
+    The sheet is blocks of: a "Log Date:M/D/YY" separator row, a header
+    row (Patient Name, RX #, ...), then data rows. The separator's date
+    is carried onto the data rows beneath it. The banner row and stray
+    notes-only rows (no RX #) are skipped. See BACKFILL_* in config.py."""
+    log_prefix = _normalize(config.BACKFILL_LOG_DATE_PREFIX)
+
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        raw_rows = [r for r in csv.reader(f) if any(c.strip() for c in r)]
+
+    col_index = {}       # csv position -> db column, from the latest header row
+    current_date = ""
+    rows = []
+    for raw in raw_rows:
+        first_norm = _normalize(raw[0]) if raw else ""
+
+        if log_prefix and first_norm.startswith(log_prefix):
+            parts = raw[0].split(":", 1)
+            if len(parts) == 2:
+                current_date = extract_date_key(parts[1].strip())
+            continue
+
+        mapped = {
+            i: config.BACKFILL_COLUMN_MAP[n]
+            for i, n in ((idx, _normalize(c)) for idx, c in enumerate(raw))
+            if n in config.BACKFILL_COLUMN_MAP
+        }
+        if {"rx_number", "name"} <= set(mapped.values()):
+            col_index = mapped
+            continue  # header row
+
+        if not col_index:
+            continue  # banner or pre-header noise
+
+        record = {
+            db_col: (raw[i].strip() if i < len(raw) else "")
+            for i, db_col in col_index.items()
+        }
+        if not record.get("rx_number"):
+            continue  # stray notes row / blank data row
+
+        if "quantity" in record:
+            record["quantity"] = _clean_number(record["quantity"])
+        record["filled_date"] = current_date
         rows.append(record)
 
     return rows

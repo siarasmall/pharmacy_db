@@ -76,6 +76,38 @@ CSV_FIELD_SEQUENCE = [
 ]
 
 # =====================================================================
+#  BACKFILL CSV MAPPING  (only used by 1_backfill_from_excel.py)
+# =====================================================================
+# The one-time backfill source is a CSV export of the OLD Excel tracker's
+# "📋 Daily Log" sheet. It is a plain-ish table, not the marker format
+# above. Layout:
+#     row: "⬇ PRIME RX DAILY LOG ..."          <- banner, ignored
+#     row: "Log Date:6/17/26 , ... "            <- separator; the date for
+#                                                  the data rows below it
+#     row: "Patient Name,RX #,Drug,Qty,DOA,..." <- header row
+#     row: "SMITH, JOHN,6154,LIDOCAINE ...,..." <- one prescription
+#     (repeat the Log Date / header / data block down the sheet)
+# Stray rows that only have a Notes cell (no RX #) are ignored.
+BACKFILL_FILE = SAMPLE_DIR / "PrimeRx_Patient_Tracker gaby copy.xlsx - 📋 Daily Log.csv"
+
+# Header text (normalized: lowercased, only letters+digits) -> database
+# column. Headers not listed here are dropped, so only the columns that
+# exist in the current model are backfilled. "rx" and the "Log Date:"
+# value become the hidden de-dup key (rx_number + filled_date).
+BACKFILL_COLUMN_MAP = {
+    "patientname": "name",
+    "rx": "rx_number",
+    "drug": "drug",
+    "qty": "quantity",
+    "officelocation": "office",
+}
+
+# A row whose first cell (normalized) starts with this is a "Log Date:"
+# separator, not data. The text after the first ":" is the fill date for
+# the rows that follow it.
+BACKFILL_LOG_DATE_PREFIX = "log date"
+
+# =====================================================================
 #  DATABASE MODEL
 # =====================================================================
 # The table name.
@@ -116,6 +148,7 @@ ALL_FIELDS = [
     ("payment_due",        "Payment Due"),
 ]
 
-# Which of ALL_FIELDS are hand-entered (get a blank default in the
-# schema and are never overwritten by an import).
+# Which of ALL_FIELDS are hand-entered (never written by the daily
+# import; the backfill only fills them if it has a value and the cell is
+# still blank).
 MANUAL_FIELD_NAMES = {col for col, _ in MANUAL_FIELDS}
