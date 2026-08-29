@@ -104,6 +104,15 @@ BACKFILL_COLUMN_MAP = {
     "notes": "notes",
 }
 
+# RX Number isn't guaranteed to be present in the backfill file. When it
+# is missing, the de-dup key's rx_number half is filled with a stable
+# hash of these columns instead, so distinct prescriptions stay distinct
+# and re-running the backfill merges rather than duplicates. Only rows
+# identical across ALL of these are treated as the same row.
+BACKFILL_HASH_FIELDS = (
+    "name", "drug", "quantity", "billing_date", "insurance_paid", "notes",
+)
+
 # =====================================================================
 #  DATABASE MODEL
 # =====================================================================

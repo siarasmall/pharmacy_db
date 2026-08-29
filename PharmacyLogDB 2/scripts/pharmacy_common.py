@@ -6,6 +6,7 @@ config.py instead.
 """
 
 import csv
+import hashlib
 import re
 import sqlite3
 from datetime import datetime
@@ -234,6 +235,20 @@ def read_nf_ins_csv(path):
 # CSV parsing (old workbook "Daily Log" sheet export — one-time backfill)
 # ---------------------------------------------------------------------
 
+def _synthetic_rx(record):
+    """A stable stand-in de-dup key for a backfill row that has no
+    RX Number, derived from the row's own content. Two backfill rows
+    identical across BACKFILL_HASH_FIELDS get the same key (so re-running
+    the backfill merges rather than duplicates); anything that differs in
+    drug / quantity / amount / etc. gets its own key and its own row.
+    The "BF-" prefix can never collide with a real numeric RX Number."""
+    basis = "|".join(
+        (record.get(f, "") or "").strip().lower()
+        for f in config.BACKFILL_HASH_FIELDS
+    )
+    return "BF-" + hashlib.sha1(basis.encode("utf-8")).hexdigest()[:12]
+
+
 def read_backfill_csv(path):
     """Read the single backfill CSV (the old "Daily Log" sheet export,
     which now also carries the billing columns) as a flat table.
@@ -242,6 +257,7 @@ def read_backfill_csv(path):
     per data row: the mapped model columns plus rx_number and filled_date
     for the hidden de-dup key. Numeric-ish columns are cleaned
     ('$3,779.40' -> '3779.4'); filled_date is normalized to YYYY-MM-DD.
+    Rows with no RX Number get a content-hash key from _synthetic_rx().
     Columns not in the map (e.g. "Claim Number") are dropped."""
     number_cols = {"quantity", "insurance_paid", "payment_received", "payment_due"}
 
@@ -274,6 +290,10 @@ def read_backfill_csv(path):
         for col in number_cols & record.keys():
             if record[col]:
                 record[col] = _clean_number(record[col])
+
+        record["_had_rx"] = bool(record.get("rx_number"))
+        if not record["_had_rx"]:
+            record["rx_number"] = _synthetic_rx(record)
         rows.append(record)
 
     return rows
