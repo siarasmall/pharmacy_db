@@ -29,12 +29,12 @@ The database has **one table, `nf_insurance_log`**, with exactly **nine columns*
 
 | Column | Where it comes from |
 |---|---|
-| **Name** | the CSV (patient name) |
+| **Name** | the CSV — cell AJ (patient name) |
 | **Office** | you type it in |
-| **Drug** | the CSV |
-| **Quantity** | the CSV |
+| **Drug** | the CSV — cell AK |
+| **Quantity** | the CSV — cell AM |
 | **Billing Date** | you type it in |
-| **Insurance Paid** | always `NF` (set automatically on every row) |
+| **Insurance Paid** | the CSV — cell AR (amount) |
 | **Payment Received** | you fill in later |
 | **Expense Case Number** | you fill in later |
 | **Discrepancy** | you fill in later |
@@ -146,9 +146,10 @@ Setup done.
 
 ## Part C — Filling in the manual fields
 
-The import fills **Name / Drug / Quantity** from the CSV and sets **Insurance
-Paid** to `NF`. The other five columns start blank for your team to fill in:
-**Office, Billing Date, Payment Received, Expense Case Number, Discrepancy.**
+The import fills **Name / Drug / Quantity / Insurance Paid** from the CSV
+(cells AJ / AK / AM / AR). The other five columns start blank for your team to
+fill in: **Office, Billing Date, Payment Received, Expense Case Number,
+Discrepancy.**
 
 1. Install **DB Browser for SQLite** (free) from **https://sqlitebrowser.org**.
 2. Open it → **Open Database** → pick `C:\PharmacyLogDB\pharmacy.db`.

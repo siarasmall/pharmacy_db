@@ -51,28 +51,29 @@ EXPORT_CSV_PATH = BASE_DIR / "nf_insurance_export.csv"   # output of 3_export_fo
 CSV_DATA_MARKER = "ins.code"
 
 # How many CSV fields after the marker field to skip before the real
-# data starts. Layout after the marker cell is:
-#   +0 "Ins.Code:"  +1 NF   +2 "Ins.Name:"  +3 NF  +4 NF
-#   +5 store id     +6 Rx#  +7 refills      +8 status
-#   +9 patient name +10 drug +11 fill date  +12 quantity  ...
+# data starts. Layout after the marker cell (with the real report's
+# spreadsheet column letters — the marker sits at column AA):
+#   +0  AA  "Ins.Code:"    +1 AB NF     +2 AC "Ins.Name:"  +3 AD NF  +4 AE NF
+#   +5  AF  store id       +6 AG Rx#    +7 AH refills       +8 AI status
+#   +9  AJ  patient name  +10 AK drug  +11 AL fill date   +12 AM quantity
+#  +13  AN  days          +14 AO --    +15 AP amount billed
+#  +16  AQ  insurer paid $ +17 AR amount   <- this is "Insurance Paid"
 CSV_MARKER_TO_DATA_OFFSET = 6
 
 # The data fields, in the exact order they appear starting at the offset
 # above. Names starting with "_" are read for positioning but dropped.
-#   name      -> spreadsheet cell AJ in the full report
-#   drug      -> cell AK
-#   quantity  -> cell AM
+#   name           -> spreadsheet cell AJ in the full report
+#   drug           -> cell AK
+#   quantity       -> cell AM
+#   insurance_paid -> cell AR
 # "rx_number" and "filled_date" are NOT displayed columns — they're kept
 # only as the de-duplication key so re-importing a file is always safe
 # (two otherwise-identical rows can still be distinct prescriptions).
 CSV_FIELD_SEQUENCE = [
     "rx_number", "_refills", "_status",
     "name", "drug", "filled_date", "quantity",
+    "_days", "_unused", "_amount_billed", "_insurer_paid", "insurance_paid",
 ]
-
-# "Insurance Paid" is stored as this literal for every imported row —
-# these are all non-formulary claims that the insurer paid $0.00 on.
-INSURANCE_PAID_VALUE = "NF"
 
 # =====================================================================
 #  DATABASE MODEL
@@ -81,8 +82,8 @@ INSURANCE_PAID_VALUE = "NF"
 TABLE_NAME = "nf_insurance_log"
 
 # CSV_FIELDS are filled straight from the NF Insurance CSV on every
-# import (name / drug / quantity from the file, insurance_paid as the
-# constant above).
+# import (name / drug / quantity / insurance_paid, read from cells
+# AJ / AK / AM / AR respectively).
 CSV_FIELDS = [
     ("name",           "Name"),
     ("drug",           "Drug"),
@@ -97,7 +98,7 @@ MANUAL_FIELDS = [
     ("billing_date",         "Billing Date"),
     ("payment_received",      "Payment Received"),
     ("expense_case_number",    "Expense Case Number"),
-    ("discrepancy",             "Discrepancy"),
+    ("payment_due",             "Payment Due"),
 ]
 
 # ALL_FIELDS is the exact column order the table is created in and the
@@ -112,7 +113,7 @@ ALL_FIELDS = [
     ("insurance_paid",     "Insurance Paid"),
     ("payment_received",   "Payment Received"),
     ("expense_case_number", "Expense Case Number"),
-    ("discrepancy",        "Discrepancy"),
+    ("payment_due",        "Payment Due"),
 ]
 
 # Which of ALL_FIELDS are hand-entered (get a blank default in the

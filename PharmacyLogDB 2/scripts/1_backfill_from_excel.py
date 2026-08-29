@@ -4,7 +4,7 @@
 The old pipeline backfilled history from an Excel "Daily Log" tracker.
 The current model is driven entirely by the NF Insurance CSV export
 (name / drug / quantity) plus fields your team fills in by hand (office,
-billing date, payment received, expense case number, discrepancy), so
+billing date, payment received, expense case number, payment due), so
 there is no Excel source to load.
 
 To load data, use:  python 2_daily_import.py

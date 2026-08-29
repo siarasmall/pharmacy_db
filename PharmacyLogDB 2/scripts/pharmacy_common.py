@@ -166,7 +166,6 @@ def read_nf_ins_csv(path):
 
         record = {k: v for k, v in raw_record.items() if not k.startswith("_")}
         record["filled_date"] = extract_date_key(record.get("filled_date", ""))
-        record["insurance_paid"] = config.INSURANCE_PAID_VALUE
         rows.append(record)
 
     return rows
