@@ -78,45 +78,30 @@ CSV_FIELD_SEQUENCE = [
 # =====================================================================
 #  BACKFILL MAPPING  (only used by 1_backfill_from_excel.py)
 # =====================================================================
-# The one-time backfill combines TWO CSV exports of the OLD workbook:
-#   - "📋 Daily Log" sheet  -> RX # and Notes for each prescription
-#   - "💰 Billing" sheet    -> everything else (name, office, drug, qty,
-#                              billing date, amount, payment, claim #,
-#                              balance due)
-# The two sheets are paired ROW BY ROW in file order: the Nth data row of
-# the Daily Log is the same prescription as the Nth data row of Billing.
-# Keep the two exports aligned. There is no shared key column between
-# them, so if their row counts differ the script pairs the first N of
-# each and warns.
-BACKFILL_DAILY_LOG_FILE = SAMPLE_DIR / "PrimeRx_Patient_Tracker gaby copy.xlsx - 📋 Daily Log.csv"
-BACKFILL_BILLING_FILE = SAMPLE_DIR / "PrimeRx_Patient_Tracker gaby copy.xlsx - 💰 Billing.csv"
+# The one-time backfill source is a SINGLE CSV: an export of the old
+# workbook's "Daily Log" sheet, which now carries the billing columns
+# too, as one flat table with a single header row:
+#   Name, Office, Claim Number, Drug, Qty, Date Billing, Amount Billed,
+#   Payment Received $, Balance Due, RX Number, Filled Date, Notes
+BACKFILL_FILE = SAMPLE_DIR / "PrimeRx_Patient_Tracker gaby copy.xlsx - Daily Log.csv"
 
-# Daily Log: header text (normalized to letters+digits) -> db column.
-# Only these are taken from that sheet; "rx" is also the de-dup key.
-BACKFILL_DAILY_LOG_MAP = {
-    "rx": "rx_number",
-    "notes": "notes",
-}
-
-# A Daily Log row whose first cell (normalized) starts with this is a
-# "Log Date:" separator, not data. Text after the first ":" dates the
-# rows beneath it (the other half of the de-dup key).
-BACKFILL_LOG_DATE_PREFIX = "log date"
-
-# Billing: header text -> db column. Normalized keeping "$" so that
-# "Payment Received" and "Payment Received $" stay distinct. Headers not
-# listed here are ignored (Insurance Carrier, Date of Accident, Billing
-# SENT are not in the model).
-BACKFILL_BILLING_MAP = {
-    "patientname": "name",
+# Header text (normalized: lowercased, only letters+digits, but "$" kept
+# so "Payment Received" and "Payment Received $" would stay distinct)
+# -> database column. Headers not listed here are ignored on purpose —
+# "Claim Number" is left out so expense_case_number stays blank for hand
+# entry. "RX Number" and "Filled Date" become the hidden de-dup key.
+BACKFILL_COLUMN_MAP = {
+    "name": "name",
     "office": "office",
     "drug": "drug",
-    "quantity": "quantity",
-    "claimnumber": "expense_case_number",
-    "datesenttobilling": "billing_date",
-    "amountbilled$": "insurance_paid",
+    "qty": "quantity",
+    "datebilling": "billing_date",
+    "amountbilled": "insurance_paid",
     "paymentreceived$": "payment_received",
-    "balancedue$": "payment_due",
+    "balancedue": "payment_due",
+    "rxnumber": "rx_number",
+    "filleddate": "filled_date",
+    "notes": "notes",
 }
 
 # =====================================================================

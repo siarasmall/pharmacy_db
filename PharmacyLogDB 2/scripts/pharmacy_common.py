@@ -97,9 +97,9 @@ def _clean_number(text):
     return str(int(value)) if value.is_integer() else str(value)
 
 
-def _norm_billing(text):
-    """Like _normalize but keeps '$', so the Billing sheet's 'Payment
-    Received' and 'Payment Received $' headers map to different columns."""
+def _norm_header(text):
+    """Like _normalize but keeps '$', so a 'Payment Received' header and a
+    'Payment Received $' header map to different columns."""
     return re.sub(r"[^a-z0-9$]", "", str(text).lower())
 
 
@@ -231,112 +231,49 @@ def read_nf_ins_csv(path):
 
 
 # ---------------------------------------------------------------------
-# CSV parsing (old workbook: "Daily Log" + "Billing" — one-time backfill)
+# CSV parsing (old workbook "Daily Log" sheet export — one-time backfill)
 # ---------------------------------------------------------------------
 
-def _read_daily_log_rx_notes(path):
-    """From a CSV export of the "📋 Daily Log" sheet, return one dict per
-    prescription row: {rx_number, notes, filled_date}. "Log Date:M/D/YY"
-    separator rows set the fill date for the rows beneath them; the
-    banner row and stray notes-only rows (no RX #) are skipped."""
-    log_prefix = _normalize(config.BACKFILL_LOG_DATE_PREFIX)
+def read_backfill_csv(path):
+    """Read the single backfill CSV (the old "Daily Log" sheet export,
+    which now also carries the billing columns) as a flat table.
 
-    with open(path, newline="", encoding="utf-8-sig") as f:
-        raw_rows = [r for r in csv.reader(f) if any(c.strip() for c in r)]
-
-    col_index = {}
-    current_date = ""
-    out = []
-    for raw in raw_rows:
-        first_norm = _normalize(raw[0]) if raw else ""
-
-        if log_prefix and first_norm.startswith(log_prefix):
-            parts = raw[0].split(":", 1)
-            if len(parts) == 2:
-                current_date = extract_date_key(parts[1].strip())
-            continue
-
-        mapped = {
-            i: config.BACKFILL_DAILY_LOG_MAP[n]
-            for i, n in ((idx, _normalize(c)) for idx, c in enumerate(raw))
-            if n in config.BACKFILL_DAILY_LOG_MAP
-        }
-        if "rx_number" in mapped.values():
-            col_index = mapped
-            continue  # header row
-
-        if not col_index:
-            continue  # banner or pre-header noise
-
-        record = {
-            db_col: (raw[i].strip() if i < len(raw) else "")
-            for i, db_col in col_index.items()
-        }
-        if not record.get("rx_number"):
-            continue  # stray notes-only row / blank data row
-        record["filled_date"] = current_date
-        out.append(record)
-
-    return out
-
-
-def _read_billing_rows(path):
-    """From a CSV export of the "💰 Billing" sheet, return one dict per
-    claim row using BACKFILL_BILLING_MAP. The banner / period / total
-    rows and rows with no patient name are skipped; numeric-ish columns
-    are cleaned ('$60.00' -> '60')."""
+    Finds the header row via BACKFILL_COLUMN_MAP, then returns one dict
+    per data row: the mapped model columns plus rx_number and filled_date
+    for the hidden de-dup key. Numeric-ish columns are cleaned
+    ('$3,779.40' -> '3779.4'); filled_date is normalized to YYYY-MM-DD.
+    Columns not in the map (e.g. "Claim Number") are dropped."""
     number_cols = {"quantity", "insurance_paid", "payment_received", "payment_due"}
 
     with open(path, newline="", encoding="utf-8-sig") as f:
         raw_rows = [r for r in csv.reader(f) if any(c.strip() for c in r)]
 
     col_index = {}
-    out = []
+    rows = []
     for raw in raw_rows:
         mapped = {
-            i: config.BACKFILL_BILLING_MAP[n]
-            for i, n in ((idx, _norm_billing(c)) for idx, c in enumerate(raw))
-            if n in config.BACKFILL_BILLING_MAP
+            i: config.BACKFILL_COLUMN_MAP[n]
+            for i, n in ((idx, _norm_header(c)) for idx, c in enumerate(raw))
+            if n in config.BACKFILL_COLUMN_MAP
         }
-        if "name" in mapped.values() and len(mapped) >= 3:
-            col_index = mapped
-            continue  # header row
 
         if not col_index:
+            # first row that looks like the header wins
+            if "name" in mapped.values() and len(mapped) >= 4:
+                col_index = mapped
             continue
 
         record = {
             db_col: (raw[i].strip() if i < len(raw) else "")
             for i, db_col in col_index.items()
         }
-        if not record.get("name"):
-            continue
+        if not any(record.get(c) for c in ("name", "rx_number", "drug")):
+            continue  # blank / junk row
 
+        record["filled_date"] = extract_date_key(record.get("filled_date", ""))
         for col in number_cols & record.keys():
             if record[col]:
                 record[col] = _clean_number(record[col])
-        out.append(record)
+        rows.append(record)
 
-    return out
-
-
-def read_backfill(daily_log_path, billing_path):
-    """Combine the two old-workbook exports into rows ready for
-    insert_backfill(). RX # / Notes / fill date come from the Daily Log;
-    everything else from Billing. The sheets have no shared key, so their
-    data rows are paired positionally (Nth with Nth). Returns
-    (rows, meta) where meta has 'daily', 'billing', 'paired' counts."""
-    daily = _read_daily_log_rx_notes(daily_log_path)
-    billing = _read_billing_rows(billing_path)
-
-    paired = min(len(daily), len(billing))
-    merged = []
-    for i in range(paired):
-        record = dict(billing[i])
-        record.update(daily[i])   # rx_number, notes, filled_date win
-        if "quantity" in record and record["quantity"]:
-            record["quantity"] = _clean_number(record["quantity"])
-        merged.append(record)
-
-    meta = {"daily": len(daily), "billing": len(billing), "paired": paired}
-    return merged, meta
+    return rows

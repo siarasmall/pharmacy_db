@@ -26,21 +26,21 @@ NF Insurance CSV  ->  drop in "inbox"  ->  run 2_daily_import.py  ->  SQLite dat
 ```
 
 The database has **one table, `nf_insurance_log`**, with exactly **ten columns**.
-Each is filled by the daily NF import, by the one-time backfill (old Daily Log +
-Billing sheets), or by hand:
+Each is filled by the daily NF import, by the one-time backfill (the old
+"Daily Log" sheet, which now carries the billing columns too), or by hand:
 
 | Column | Where it comes from |
 |---|---|
-| **Name** | daily: CSV cell AJ · backfill: Billing "Patient Name" |
-| **Office** | backfill: Billing "Office" (else you type it) |
-| **Drug** | daily: CSV cell AK · backfill: Billing "Drug" |
-| **Quantity** | daily: CSV cell AM · backfill: Billing "Quantity" |
-| **Billing Date** | backfill: Billing "Date Sent to Billing" (else you type it) |
-| **Insurance Paid** | daily: CSV cell AR · backfill: Billing "Amount Billed ($)" |
-| **Payment Received** | backfill: Billing "Payment Received $" (else you type it) |
-| **Expense Case Number** | backfill: Billing "Claim Number" (else you type it) |
-| **Payment Due** | backfill: Billing "Balance Due ($)" (else you type it) |
-| **Notes** | backfill: Daily Log "Notes" (else you type it) |
+| **Name** | daily: CSV cell AJ · backfill: "Name" |
+| **Office** | backfill: "Office" (else you type it) |
+| **Drug** | daily: CSV cell AK · backfill: "Drug" |
+| **Quantity** | daily: CSV cell AM · backfill: "Qty" |
+| **Billing Date** | backfill: "Date Billing" (else you type it) |
+| **Insurance Paid** | daily: CSV cell AR · backfill: "Amount Billed" |
+| **Payment Received** | backfill: "Payment Received $" (else you type it) |
+| **Expense Case Number** | you type it in (not backfilled) |
+| **Payment Due** | backfill: "Balance Due" (else you type it) |
+| **Notes** | backfill: "Notes" (else you type it) |
 
 Re-importing the same file is always safe: prescriptions already loaded are
 skipped, and anything you typed in by hand is never overwritten.
@@ -52,12 +52,12 @@ skipped, and anything you typed in by hand is never overwritten.
 | File | What it's for |
 |---|---|
 | `scripts/config.py` | The **only** file you normally edit (paths). |
-| `scripts/1_backfill_from_excel.py` | Run **once** to load history from the old "📋 Daily Log" + "💰 Billing" sheets (exported to CSV). |
+| `scripts/1_backfill_from_excel.py` | Run **once** to load history from the old "Daily Log" sheet (exported to CSV). |
 | `scripts/2_daily_import.py` | Run to load an NF Insurance CSV export. |
 | `scripts/3_export_for_powerbi.py` | Optional — dumps the 10 columns to a CSV for Power BI/Excel. |
 | `scripts/pharmacy_common.py` | Shared engine — do **not** edit. |
 | `sample_data/NF Ins Test.csv` | A sample daily export so you can practice safely first. |
-| `sample_data/... 📋 Daily Log.csv` + `... 💰 Billing.csv` | The paired backfill samples. |
+| `sample_data/... Daily Log.csv` | A sample backfill file. |
 
 ---
 
@@ -120,18 +120,17 @@ Save and close.
 
 ### Step 5 — Load the history (run the backfill ONCE)
 
-If you have history in the old workbook, export **both** of these tabs to CSV:
+If you have history in the old workbook, export the **"Daily Log"** sheet to a
+single CSV. That sheet has one header row with all of these columns:
 
-- **"📋 Daily Log"** — supplies the **RX #** and **Notes** for each script.
-- **"💰 Billing"** — supplies everything else (name, office, drug, quantity,
-  billing date, amount, payment received, claim number, balance due).
+    Name, Office, Claim Number, Drug, Qty, Date Billing, Amount Billed,
+    Payment Received $, Balance Due, RX Number, Filled Date, Notes
 
-The two tabs are matched **row by row in order** — the 1st prescription in Daily
-Log must be the 1st in Billing, and so on — because nothing else links them.
-Don't sort or filter one without the other.
+Everything except **Claim Number** is loaded (Expense Case Number stays blank for
+you to fill in). **RX Number** and **Filled Date** are what stop duplicates, so
+make sure those columns are filled in.
 
-Set `BACKFILL_DAILY_LOG_FILE` and `BACKFILL_BILLING_FILE` in `config.py` to those
-two files, then:
+Set `BACKFILL_FILE` in `config.py` to that CSV, then:
 
 ```
 cd C:\PharmacyLogDB\scripts
@@ -139,8 +138,8 @@ python 1_backfill_from_excel.py
 ```
 
 Run this **before** you start daily imports. It's safe to re-run — existing rows
-only get their blank cells topped up. If it prints a **row-count mismatch
-warning**, the two exports weren't lined up — fix and re-run.
+only get their blank cells topped up. If it warns that rows are missing
+**RX Number / Filled Date**, fill those in and re-run.
 
 ### Step 6 — Turn on disk encryption (BitLocker)
 
@@ -176,8 +175,8 @@ Setup done.
 
 The daily import fills **Name / Drug / Quantity / Insurance Paid** from the CSV
 (cells AJ / AK / AM / AR); the one-time backfill fills most of the rest from the
-Billing sheet. Any cell still blank — **Office, Billing Date, Payment Received,
-Expense Case Number, Payment Due, Notes** — you fill in here:
+"Daily Log" sheet. Any cell still blank — **Office, Billing Date, Payment
+Received, Expense Case Number, Payment Due, Notes** — you fill in here:
 
 1. Install **DB Browser for SQLite** (free) from **https://sqlitebrowser.org**.
 2. Open it → **Open Database** → pick `C:\PharmacyLogDB\pharmacy.db`.
