@@ -28,12 +28,10 @@ from pathlib import Path
 #   BASE_DIR = Path(r"C:\PharmacyLogDB")
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-INBOX_DIR = BASE_DIR / "sample_data"      #TODO: switch back to inbox   # drop today's NF Insurance CSV export(s) here
+INBOX_DIR = BASE_DIR / "inbox"      # drop today's NF Insurance CSV export(s) here
 ARCHIVE_DIR = BASE_DIR / "archive"     # processed CSVs are moved here automatically
-SAMPLE_DIR = BASE_DIR / "sample_data"
 
 DB_PATH = BASE_DIR / "pharmacy.db"                    # the database (back this up!)
-EXPORT_CSV_PATH = BASE_DIR / "nf_insurance_export.csv"   # output of 3_export_for_powerbi.py
 
 # =====================================================================
 #  CSV COLUMN MAPPING  (used by 2_daily_import.py)
