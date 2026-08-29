@@ -34,8 +34,7 @@ def main():
         print("Check BACKFILL_COLUMN_MAP in config.py.")
         sys.exit(1)
 
-    no_rx = sum(1 for r in rows if not r.get("rx_number"))
-    no_date = sum(1 for r in rows if not r.get("filled_date"))
+    no_rx = sum(1 for r in rows if not r.get("_had_rx"))
 
     conn = common.get_connection()
     common.ensure_schema(conn)
@@ -46,10 +45,11 @@ def main():
 
     print(f"Rows found: {len(rows)}  new: {new_count}  "
           f"blank fields filled on existing rows: {filled_count}")
-    if no_rx or no_date:
-        print(f"Note: {no_rx} row(s) had no RX Number and {no_date} had no Filled")
-        print("Date. The de-dup key is (RX Number + Filled Date), so rows missing")
-        print("both collapse into one — fill those in and re-run if the count looks low.")
+    if no_rx:
+        print(f"Note: {no_rx} row(s) had no RX Number — keyed by content instead")
+        print("(name / drug / quantity / billing date / amount / notes). Rows that")
+        print("match on all of those are treated as one; add RX Numbers and re-run")
+        print("if two real prescriptions got merged.")
     print("Backfill complete.")
 
 

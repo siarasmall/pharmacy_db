@@ -127,8 +127,10 @@ single CSV. That sheet has one header row with all of these columns:
     Payment Received $, Balance Due, RX Number, Filled Date, Notes
 
 Everything except **Claim Number** is loaded (Expense Case Number stays blank for
-you to fill in). **RX Number** and **Filled Date** are what stop duplicates, so
-make sure those columns are filled in.
+you to fill in). **RX Number** + **Filled Date** are what stop duplicates. Rows
+that have no RX Number still load — they're matched on their content (name, drug,
+quantity, billing date, amount, notes) instead — but rows that are identical
+across all of those will be treated as one, so fill in RX Numbers where you can.
 
 Set `BACKFILL_FILE` in `config.py` to that CSV, then:
 
@@ -138,8 +140,9 @@ python 1_backfill_from_excel.py
 ```
 
 Run this **before** you start daily imports. It's safe to re-run — existing rows
-only get their blank cells topped up. If it warns that rows are missing
-**RX Number / Filled Date**, fill those in and re-run.
+only get their blank cells topped up. The run tells you how many rows had no
+RX Number; if that number is high and real prescriptions look merged, add
+RX Numbers to those rows and re-run.
 
 ### Step 6 — Turn on disk encryption (BitLocker)
 
@@ -244,6 +247,6 @@ encrypted — never cloud-sync PHI.
 
 - **Database (back this up):** `C:\PharmacyLogDB\pharmacy.db`
 - **Table:** `nf_insurance_log` (10 columns)
-- **Unique key:** Rx # + fill date (prevents duplicates; both are hidden helper columns)
+- **Unique key:** Rx # + fill date (hidden helper columns; backfill rows with no Rx # fall back to a content hash)
 - **Scripts:** `C:\PharmacyLogDB\scripts`
 - **Daily command:** `python 2_daily_import.py`
