@@ -81,7 +81,7 @@ CSV_FIELD_SEQUENCE = [
 # too, as one flat table with a single header row:
 #   Name, Office, Claim Number, Drug, Qty, Date Billing, Amount Billed,
 #   Payment Received $, Balance Due, RX Number, Filled Date, Notes
-BACKFILL_FILE = SAMPLE_DIR / "database_transfer.csv"
+BACKFILL_FILE = INBOX_DIR / "database_transfer.csv"
 
 # Header text (normalized: lowercased, only letters+digits, but "$" kept
 # so "Payment Received" and "Payment Received $" would stay distinct)
