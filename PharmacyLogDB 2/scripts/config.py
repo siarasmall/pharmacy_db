@@ -76,36 +76,48 @@ CSV_FIELD_SEQUENCE = [
 ]
 
 # =====================================================================
-#  BACKFILL CSV MAPPING  (only used by 1_backfill_from_excel.py)
+#  BACKFILL MAPPING  (only used by 1_backfill_from_excel.py)
 # =====================================================================
-# The one-time backfill source is a CSV export of the OLD Excel tracker's
-# "📋 Daily Log" sheet. It is a plain-ish table, not the marker format
-# above. Layout:
-#     row: "⬇ PRIME RX DAILY LOG ..."          <- banner, ignored
-#     row: "Log Date:6/17/26 , ... "            <- separator; the date for
-#                                                  the data rows below it
-#     row: "Patient Name,RX #,Drug,Qty,DOA,..." <- header row
-#     row: "SMITH, JOHN,6154,LIDOCAINE ...,..." <- one prescription
-#     (repeat the Log Date / header / data block down the sheet)
-# Stray rows that only have a Notes cell (no RX #) are ignored.
-BACKFILL_FILE = SAMPLE_DIR / "PrimeRx_Patient_Tracker gaby copy.xlsx - 📋 Daily Log.csv"
+# The one-time backfill combines TWO CSV exports of the OLD workbook:
+#   - "📋 Daily Log" sheet  -> RX # and Notes for each prescription
+#   - "💰 Billing" sheet    -> everything else (name, office, drug, qty,
+#                              billing date, amount, payment, claim #,
+#                              balance due)
+# The two sheets are paired ROW BY ROW in file order: the Nth data row of
+# the Daily Log is the same prescription as the Nth data row of Billing.
+# Keep the two exports aligned. There is no shared key column between
+# them, so if their row counts differ the script pairs the first N of
+# each and warns.
+BACKFILL_DAILY_LOG_FILE = SAMPLE_DIR / "PrimeRx_Patient_Tracker gaby copy.xlsx - 📋 Daily Log.csv"
+BACKFILL_BILLING_FILE = SAMPLE_DIR / "PrimeRx_Patient_Tracker gaby copy.xlsx - 💰 Billing.csv"
 
-# Header text (normalized: lowercased, only letters+digits) -> database
-# column. Headers not listed here are dropped, so only the columns that
-# exist in the current model are backfilled. "rx" and the "Log Date:"
-# value become the hidden de-dup key (rx_number + filled_date).
-BACKFILL_COLUMN_MAP = {
-    "patientname": "name",
+# Daily Log: header text (normalized to letters+digits) -> db column.
+# Only these are taken from that sheet; "rx" is also the de-dup key.
+BACKFILL_DAILY_LOG_MAP = {
     "rx": "rx_number",
-    "drug": "drug",
-    "qty": "quantity",
-    "officelocation": "office",
+    "notes": "notes",
 }
 
-# A row whose first cell (normalized) starts with this is a "Log Date:"
-# separator, not data. The text after the first ":" is the fill date for
-# the rows that follow it.
+# A Daily Log row whose first cell (normalized) starts with this is a
+# "Log Date:" separator, not data. Text after the first ":" dates the
+# rows beneath it (the other half of the de-dup key).
 BACKFILL_LOG_DATE_PREFIX = "log date"
+
+# Billing: header text -> db column. Normalized keeping "$" so that
+# "Payment Received" and "Payment Received $" stay distinct. Headers not
+# listed here are ignored (Insurance Carrier, Date of Accident, Billing
+# SENT are not in the model).
+BACKFILL_BILLING_MAP = {
+    "patientname": "name",
+    "office": "office",
+    "drug": "drug",
+    "quantity": "quantity",
+    "claimnumber": "expense_case_number",
+    "datesenttobilling": "billing_date",
+    "amountbilled$": "insurance_paid",
+    "paymentreceived$": "payment_received",
+    "balancedue$": "payment_due",
+}
 
 # =====================================================================
 #  DATABASE MODEL
@@ -123,14 +135,16 @@ CSV_FIELDS = [
     ("insurance_paid", "Insurance Paid"),
 ]
 
-# MANUAL_FIELDS start blank and are filled in later by your team in
-# DB Browser for SQLite.
+# MANUAL_FIELDS are everything the daily NF import does NOT fill. The
+# backfill populates most of them from the Billing sheet; anything still
+# blank is typed in later in DB Browser for SQLite.
 MANUAL_FIELDS = [
     ("office",              "Office"),
     ("billing_date",         "Billing Date"),
     ("payment_received",      "Payment Received"),
     ("expense_case_number",    "Expense Case Number"),
     ("payment_due",             "Payment Due"),
+    ("notes",                    "Notes"),
 ]
 
 # ALL_FIELDS is the exact column order the table is created in and the
@@ -146,6 +160,7 @@ ALL_FIELDS = [
     ("payment_received",   "Payment Received"),
     ("expense_case_number", "Expense Case Number"),
     ("payment_due",        "Payment Due"),
+    ("notes",              "Notes"),
 ]
 
 # Which of ALL_FIELDS are hand-entered (never written by the daily
