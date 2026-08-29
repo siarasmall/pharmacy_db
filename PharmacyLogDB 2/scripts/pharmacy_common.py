@@ -35,11 +35,15 @@ def get_connection():
 
 
 def ensure_schema(conn):
-    """Creates the table from config.ALL_FIELDS if it doesn't exist yet.
-    Columns are created in ALL_FIELDS order; every column defaults to ''
-    so a field a given import doesn't supply reads as blank, not NULL.
-    rx_number + filled_date are hidden bookkeeping columns used only as
-    the de-dup key."""
+    """Create the table from config.ALL_FIELDS if it doesn't exist yet,
+    and — if it already exists — ADD any ALL_FIELDS column it's missing.
+
+    SQLite can add a column but not drop or rename one, so after you
+    rename/remove an entry in ALL_FIELDS the old column just sits there
+    unused (harmless; it's not in the export). Every model column
+    defaults to '' so a field an import doesn't supply reads as blank,
+    not NULL. rx_number + filled_date are hidden bookkeeping columns used
+    only as the de-dup key."""
     col_defs = [f"{col} TEXT DEFAULT ''" for col, _ in config.ALL_FIELDS]
     body = ",\n            ".join(col_defs)
     conn.execute(
@@ -55,6 +59,15 @@ def ensure_schema(conn):
         )
         """
     )
+
+    existing = {row[1] for row in conn.execute(
+        f"PRAGMA table_info({config.TABLE_NAME})"
+    )}
+    for col, _ in config.ALL_FIELDS:
+        if col not in existing:
+            conn.execute(
+                f"ALTER TABLE {config.TABLE_NAME} ADD COLUMN {col} TEXT DEFAULT ''"
+            )
     conn.commit()
 
 
