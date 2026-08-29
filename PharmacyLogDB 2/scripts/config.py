@@ -1,17 +1,14 @@
 """
 config.py — the ONE file you normally need to edit.
 
-Everything the scripts need to know about your folder layout, your Excel
-workbook, and how the PrimeRx export lines up lives here. If a script
-prints an error about a missing file or a column it can't find, this is
-the file to fix.
+Everything the scripts need to know about your folder layout and how the
+"NF Insurance" report export lines up with the database lives here. If a
+script prints an error about a missing file or a column it can't find,
+this is the file to fix.
 
-This version was rebuilt directly against your real files:
-  - SAMPLE_primerx_daily_log.csv  (the actual PrimeRx "Daily Log Report" export)
-  - PrimeRx_Patient_Tracker (gaby copy).xlsx  ("📋 Daily Log" tab, Excel Table
-    named "DailyLogTable")
-  - DailyLogAutomation Office Script.txt  (your old Office Script, used to
-    cross-check column positions)
+This version is built against the real NF-insurance export:
+  - "NF Ins Test.csv" in sample_data/  (every row is one non-formulary
+    prescription, prefixed by an "Ins.Code:" marker)
 """
 
 from pathlib import Path
@@ -31,120 +28,93 @@ from pathlib import Path
 #   BASE_DIR = Path(r"C:\PharmacyLogDB")
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-HISTORY_DIR = BASE_DIR / "history"     # current/old Excel tracker lives here
-INBOX_DIR = BASE_DIR / "sample_data"      #TODO: switch back to inbox   # drop today's PrimeRx CSV export(s) here
+INBOX_DIR = BASE_DIR / "sample_data"      #TODO: switch back to inbox   # drop today's NF Insurance CSV export(s) here
 ARCHIVE_DIR = BASE_DIR / "archive"     # processed CSVs are moved here automatically
 SAMPLE_DIR = BASE_DIR / "sample_data"
 
 DB_PATH = BASE_DIR / "pharmacy.db"                    # the database (back this up!)
-EXPORT_CSV_PATH = BASE_DIR / "daily_log_export.csv"   # output of 3_export_for_powerbi.py
+EXPORT_CSV_PATH = BASE_DIR / "nf_insurance_export.csv"   # output of 3_export_for_powerbi.py
 
 # =====================================================================
-#  EXCEL BACKFILL SETTINGS  (only used by 1_backfill_from_excel.py)
+#  CSV COLUMN MAPPING  (used by 2_daily_import.py)
 # =====================================================================
-EXCEL_FILE = SAMPLE_DIR / "SAMPLE_PrimeRx_Patient_Tracker.xlsx" #TODO: switch back to history
-EXCEL_DAILY_LOG_SHEET = "📋 Daily Log"
-
-# Your Daily Log tab is a real Excel Table (Insert > Table), named below.
-# We read its column headers straight from the table definition — that's
-# more reliable than guessing at header text — and use its column order
-# to know which cell is which. If your real workbook's table has a
-# different name, update it here (Excel: click any cell in the table,
-# check the "Table Name" box on the Table Design ribbon tab).
-EXCEL_TABLE_NAME = "DailyLogTable"
-
-# Maps each table column header (lowercased, punctuation ignored) to a
-# database field. Add an entry here if your real header text differs
-# from what's listed (e.g. if a header is "Rx Number" instead of "RX #").
-EXCEL_COLUMN_ALIASES = {
-    "patientname": "patient",
-    "patient": "patient",
-    "rx": "rx_number",
-    "rxnumber": "rx_number",
-    "drug": "drug",
-    "qty": "qty",
-    "quantity": "qty",
-    "doa": "doa",
-    "insurancecarrier": "insurance_carrier",
-    "prescriber": "prescriber",
-    "officelocation": "office_location",
-    "office": "office_location",
-    "demo": "demo",
-    "notes": "notes",
-    "note": "notes",
-}
-
-# Your old Office Script inserts a row like "Log Date:6/17/26" every time
-# the date changes, styled in blue/italic, to visually separate each
-# day's batch (see DailyLogAutomation Office Script.txt). Those rows
-# don't have their own Rx #, so the backfill script uses them to figure
-# out which date each data row underneath belongs to. This is the text
-# it looks for at the start of the "Patient Name" cell.
-EXCEL_LOG_DATE_PREFIX = "log date"
-
-# =====================================================================
-#  CSV COLUMN MAPPING  (only used by 2_daily_import.py)
-# =====================================================================
-# The real PrimeRx "Daily Log Report" CSV export is NOT a simple table
-# with one header row — every single line repeats the pharmacy's full
-# letterhead and the report's column-title text, then the actual data
-# for that one prescription. (Confirmed against your real
-# SAMPLE_primerx_daily_log.csv — every one of its 19 rows has this exact
-# layout, and the field positions match your old Office Script's
-# COL_PATIENT / COL_RX / COL_DRUG / COL_QTY / COL_PRESCRIBER / COL_LOGDATE
-# constants exactly.)
+# The NF Insurance export is NOT a simple table with one header row.
+# Every data line starts with the pharmacy's report letterhead, then an
+# "Ins.Code:" marker, then that one prescription's data, then the
+# report's running totals. (Confirmed against "NF Ins Test.csv": all 53
+# rows share this exact layout.)
 #
-# Rather than counting columns from the start of the line (fragile if
-# the letterhead ever changes), the import script looks for this marker
-# text, which sits right before each row's real data:
-#     *** Daily Log For : 8/25/2026 ***
-CSV_DATA_MARKER = "daily log for"
+# Rather than counting columns from the start of the line (fragile if the
+# letterhead ever changes width), the import script finds this marker
+# text and reads a fixed sequence of fields that follows it:
+#     Ins.Code:
+CSV_DATA_MARKER = "ins.code"
 
 # How many CSV fields after the marker field to skip before the real
-# data starts (there's one blank field between the marker and Rx #).
-CSV_MARKER_TO_DATA_OFFSET = 2
+# data starts. Layout after the marker cell is:
+#   +0 "Ins.Code:"  +1 NF   +2 "Ins.Name:"  +3 NF  +4 NF
+#   +5 store id     +6 Rx#  +7 refills      +8 status
+#   +9 patient name +10 drug +11 fill date  +12 quantity  ...
+CSV_MARKER_TO_DATA_OFFSET = 6
 
-# The real data fields, in the exact order they appear after the marker.
-# "_date_raw" and "_time_raw" get combined into date_time_filled.
-# "_unused" is a spacer column PrimeRx always leaves blank.
+# The data fields, in the exact order they appear starting at the offset
+# above. Names starting with "_" are read for positioning but dropped.
+#   name      -> spreadsheet cell AJ in the full report
+#   drug      -> cell AK
+#   quantity  -> cell AM
+# "rx_number" and "filled_date" are NOT displayed columns — they're kept
+# only as the de-duplication key so re-importing a file is always safe
+# (two otherwise-identical rows can still be distinct prescriptions).
 CSV_FIELD_SEQUENCE = [
-    "rx_number", "status", "ref", "_date_raw", "_time_raw",
-    "patient", "address", "prescriber", "drug", "qty", "days",
-    "_unused", "copay", "ins", "ph_tech",
+    "rx_number", "_refills", "_status",
+    "name", "drug", "filled_date", "quantity",
 ]
 
+# "Insurance Paid" is stored as this literal for every imported row —
+# these are all non-formulary claims that the insurer paid $0.00 on.
+INSURANCE_PAID_VALUE = "NF"
+
 # =====================================================================
-#  DATABASE FIELDS
+#  DATABASE MODEL
 # =====================================================================
-# AUTO_FIELDS are filled straight from the PrimeRx CSV every day.
-# (status and ref are extra fields your real export includes beyond
-# what the original setup guide listed — kept because the data's
-# already there for free.)
-AUTO_FIELDS = [
-    ("rx_number",        "Rx #"),
-    ("status",            "Status"),
-    ("ref",                "Ref"),
-    ("date_time_filled",    "Date/Time Filled"),
-    ("patient",              "Patient"),
-    ("address",                "Address"),
-    ("prescriber",               "Prescriber"),
-    ("drug",                       "Drug"),
-    ("qty",                          "Qty"),
-    ("days",                          "Days"),
-    ("copay",                          "CoPay"),
-    ("ins",                              "Ins"),
-    ("ph_tech",                           "PH/Tech"),
+# The table name.
+TABLE_NAME = "nf_insurance_log"
+
+# CSV_FIELDS are filled straight from the NF Insurance CSV on every
+# import (name / drug / quantity from the file, insurance_paid as the
+# constant above).
+CSV_FIELDS = [
+    ("name",           "Name"),
+    ("drug",           "Drug"),
+    ("quantity",       "Quantity"),
+    ("insurance_paid", "Insurance Paid"),
 ]
 
 # MANUAL_FIELDS start blank and are filled in later by your team in
-# DB Browser for SQLite. The backfill script pulls these straight from
-# the matching columns in the DailyLogTable Excel table.
+# DB Browser for SQLite.
 MANUAL_FIELDS = [
-    ("doa",               "DOA"),
-    ("insurance_carrier",  "Insurance Carrier"),
-    ("office_location",     "Office Location"),
-    ("demo",                 "Demo"),
-    ("notes",                 "Notes"),
+    ("office",              "Office"),
+    ("billing_date",         "Billing Date"),
+    ("payment_received",      "Payment Received"),
+    ("expense_case_number",    "Expense Case Number"),
+    ("discrepancy",             "Discrepancy"),
 ]
 
-ALL_FIELDS = AUTO_FIELDS + MANUAL_FIELDS
+# ALL_FIELDS is the exact column order the table is created in and the
+# order the export CSV is written in. Change this list to add, remove,
+# rename, or re-order what the database holds.
+ALL_FIELDS = [
+    ("name",               "Name"),
+    ("office",              "Office"),
+    ("drug",               "Drug"),
+    ("quantity",           "Quantity"),
+    ("billing_date",       "Billing Date"),
+    ("insurance_paid",     "Insurance Paid"),
+    ("payment_received",   "Payment Received"),
+    ("expense_case_number", "Expense Case Number"),
+    ("discrepancy",        "Discrepancy"),
+]
+
+# Which of ALL_FIELDS are hand-entered (get a blank default in the
+# schema and are never overwritten by an import).
+MANUAL_FIELD_NAMES = {col for col, _ in MANUAL_FIELDS}

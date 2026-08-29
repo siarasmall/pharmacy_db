@@ -1,16 +1,15 @@
 """
 2_daily_import.py — run this every day (about 30 seconds).
 
-Loads every PrimeRx Daily Log Report CSV sitting in the inbox folder,
-skips anything already imported, and moves processed files to archive.
+Loads every NF Insurance report CSV sitting in the inbox folder, skips
+anything already imported, and moves processed files to archive.
 
-Only uses Python's built-in libraries — nothing to install for this one.
+Only uses Python's built-in libraries — nothing to install.
 """
 
 import shutil
 import sys
 from datetime import datetime
-from pathlib import Path
 
 import config
 import pharmacy_common as common
@@ -18,7 +17,7 @@ import pharmacy_common as common
 
 def process_file(conn, csv_path):
     try:
-        rows = common.read_primerx_csv(csv_path)
+        rows = common.read_nf_ins_csv(csv_path)
     except Exception as exc:
         print(f"  ERROR reading {csv_path.name}: {exc}")
         print("  Left in inbox — fix the issue and re-run.")
@@ -26,11 +25,11 @@ def process_file(conn, csv_path):
 
     if not rows:
         print(f"  {csv_path.name}: No prescription rows detected.")
-        print("  The CSV isn't the PrimeRx Daily Log Report format, or it's empty.")
-        print("  Re-export from PrimeRx. (File left in inbox.)")
+        print("  The CSV isn't the NF Insurance report format, or it's empty.")
+        print("  Re-export the report. (File left in inbox.)")
         return None
 
-    new_count = common.insert_auto_only(conn, rows, source_file=csv_path.name)
+    new_count = common.insert_from_csv(conn, rows, source_file=csv_path.name)
     print(f"  {csv_path.name}: Rows found: {len(rows)}  new: {new_count}")
     return len(rows)
 
