@@ -34,6 +34,28 @@ def get_connection():
     return conn
 
 
+def _sql_real(col):
+    """SQLite expression: a money-ish text column ('1,892.20', '$5 ')
+    read as a REAL, tolerating thousands commas, '$' and spaces."""
+    return (
+        "CAST(REPLACE(REPLACE(REPLACE(COALESCE(" + col
+        + ", ''), ',', ''), '$', ''), ' ', '') AS REAL)"
+    )
+
+
+def _payment_due_expr(prefix=""):
+    """SQLite expression for  payment_due = insurance_paid - payment_received,
+    formatted to 2 decimals. `prefix` is '' (bare columns) or 'NEW.'
+    (inside a trigger)."""
+    return (
+        "printf('%.2f', "
+        + _sql_real(prefix + "insurance_paid")
+        + " - "
+        + _sql_real(prefix + "payment_received")
+        + ")"
+    )
+
+
 def ensure_schema(conn):
     """Create the table from config.ALL_FIELDS if it doesn't exist yet,
     and — if it already exists — ADD any ALL_FIELDS column it's missing.
@@ -43,7 +65,12 @@ def ensure_schema(conn):
     unused (harmless; it's not in the export). Every model column
     defaults to '' so a field an import doesn't supply reads as blank,
     not NULL. rx_number + filled_date are hidden bookkeeping columns used
-    only as the de-dup key."""
+    only as the de-dup key.
+
+    Also installs two triggers that keep `payment_due` equal to
+    `insurance_paid - payment_received`: one fills it on INSERT when it
+    came in blank, the other recomputes it whenever either input is
+    changed (by a script, by DB Browser, by anything)."""
     col_defs = [f"{col} TEXT DEFAULT ''" for col, _ in config.ALL_FIELDS]
     body = ",\n            ".join(col_defs)
     conn.execute(
@@ -68,6 +95,40 @@ def ensure_schema(conn):
             conn.execute(
                 f"ALTER TABLE {config.TABLE_NAME} ADD COLUMN {col} TEXT DEFAULT ''"
             )
+
+    t = config.TABLE_NAME
+    due = _payment_due_expr("NEW.")
+    conn.executescript(
+        f"""
+        DROP TRIGGER IF EXISTS {t}_payment_due_ai;
+        CREATE TRIGGER {t}_payment_due_ai
+        AFTER INSERT ON {t}
+        WHEN TRIM(COALESCE(NEW.payment_due, '')) = ''
+         AND (TRIM(COALESCE(NEW.insurance_paid, '')) <> ''
+              OR TRIM(COALESCE(NEW.payment_received, '')) <> '')
+        BEGIN
+            UPDATE {t} SET payment_due = {due} WHERE id = NEW.id;
+        END;
+
+        DROP TRIGGER IF EXISTS {t}_payment_due_au;
+        CREATE TRIGGER {t}_payment_due_au
+        AFTER UPDATE OF insurance_paid, payment_received ON {t}
+        BEGIN
+            UPDATE {t} SET payment_due = {due} WHERE id = NEW.id;
+        END;
+        """
+    )
+
+    # One-off: fill payment_due for rows already in the table that were
+    # inserted before these triggers existed.
+    conn.execute(
+        f"""
+        UPDATE {t} SET payment_due = {_payment_due_expr()}
+        WHERE TRIM(COALESCE(payment_due, '')) = ''
+          AND (TRIM(COALESCE(insurance_paid, '')) <> ''
+               OR TRIM(COALESCE(payment_received, '')) <> '')
+        """
+    )
     conn.commit()
 
 
@@ -109,6 +170,26 @@ def _clean_number(text):
     except ValueError:
         return stripped
     return str(int(value)) if value.is_integer() else str(value)
+
+
+def _num(text):
+    """Parse a money-ish string ('1,892.20', '$5', '') to a float;
+    0.0 when it isn't a number."""
+    cleaned = (text or "").replace(",", "").replace("$", "").strip()
+    try:
+        return float(cleaned or 0)
+    except ValueError:
+        return 0.0
+
+
+_NULL_TOKENS = {"", "null", "none", "n/a", "na", "#n/a"}
+
+
+def _cell(value):
+    """Strip a CSV cell, treating literal 'NULL' / 'None' / 'N/A'
+    placeholder text as an empty value."""
+    stripped = (value or "").strip()
+    return "" if stripped.lower() in _NULL_TOKENS else stripped
 
 
 def _norm_header(text):
@@ -268,10 +349,12 @@ def read_backfill_csv(path):
 
     Finds the header row via BACKFILL_COLUMN_MAP, then returns one dict
     per data row: the mapped model columns plus rx_number and filled_date
-    for the hidden de-dup key. Numeric-ish columns are cleaned
-    ('$3,779.40' -> '3779.4'); filled_date is normalized to YYYY-MM-DD.
-    Rows with no RX Number get a content-hash key from _synthetic_rx().
-    Columns not in the map (e.g. "Claim Number") are dropped."""
+    for the hidden de-dup key. Literal 'NULL' / 'N/A' cells are treated as
+    blank; numeric-ish columns are cleaned ('$3,779.40' -> '3779.4');
+    filled_date is normalized to YYYY-MM-DD. `payment_due` is computed as
+    insurance_paid - payment_received when it comes in blank. Rows with no
+    RX Number get a content-hash key from _synthetic_rx(). Columns not in
+    the map (e.g. "Claim Number", "Balance Due") are dropped."""
     number_cols = {"quantity", "insurance_paid", "payment_received", "payment_due"}
 
     with open(path, newline="", encoding="utf-8-sig") as f:
@@ -293,7 +376,7 @@ def read_backfill_csv(path):
             continue
 
         record = {
-            db_col: (raw[i].strip() if i < len(raw) else "")
+            db_col: _cell(raw[i] if i < len(raw) else "")
             for i, db_col in col_index.items()
         }
         if not any(record.get(c) for c in ("name", "rx_number", "drug")):
@@ -303,6 +386,15 @@ def read_backfill_csv(path):
         for col in number_cols & record.keys():
             if record[col]:
                 record[col] = _clean_number(record[col])
+
+        if not (record.get("payment_due") or "").strip() and (
+            (record.get("insurance_paid") or "").strip()
+            or (record.get("payment_received") or "").strip()
+        ):
+            record["payment_due"] = "%.2f" % (
+                _num(record.get("insurance_paid"))
+                - _num(record.get("payment_received"))
+            )
 
         record["_had_rx"] = bool(record.get("rx_number"))
         if not record["_had_rx"]:

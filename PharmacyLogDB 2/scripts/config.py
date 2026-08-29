@@ -87,9 +87,13 @@ BACKFILL_FILE = SAMPLE_DIR / "database_transfer.csv"
 
 # Header text (normalized: lowercased, only letters+digits, but "$" kept
 # so "Payment Received" and "Payment Received $" would stay distinct)
-# -> database column. Headers not listed here are ignored on purpose —
-# "Claim Number" is left out so expense_case_number stays blank for hand
-# entry. "RX Number" and "Filled Date" become the hidden de-dup key.
+# -> database column. Headers not listed here are ignored on purpose:
+#   - "Claim Number"  -> expense_case_number stays blank for hand entry
+#   - "Balance Due"   -> payment_due is always DERIVED as
+#                        insurance_paid - payment_received (computed here
+#                        when blank, and kept in sync afterwards by DB
+#                        triggers), so the file's own column is ignored
+# "RX Number" and "Filled Date" become the hidden de-dup key.
 BACKFILL_COLUMN_MAP = {
     "name": "name",
     "office": "office",
@@ -98,7 +102,6 @@ BACKFILL_COLUMN_MAP = {
     "datebilling": "billing_date",
     "amountbilled": "insurance_paid",
     "paymentreceived$": "payment_received",
-    "balancedue": "payment_due",
     "rxnumber": "rx_number",
     "filleddate": "filled_date",
     "notes": "notes",
@@ -153,7 +156,7 @@ ALL_FIELDS = [
     ("insurance_paid",     "Insurance Paid"),
     ("payment_received",   "Payment Received"),
     ("expense_case_number", "Expense Case Number"),
-    ("payment_due",        "Payment Due"),
+    ("payment_due",        "Payment Due"),   # DERIVED: insurance_paid - payment_received (DB triggers keep it current — don't hand-edit)
     ("notes",              "Notes"),
 ]
 

@@ -20,7 +20,7 @@ already matches your file.
 NF Insurance CSV  ->  drop in "inbox"  ->  run 2_daily_import.py  ->  SQLite database
                                                                         |
    fill in Office / Billing Date / Payment Received / Expense Case #     |
-                  / Payment Due   <--  DB Browser for SQLite             |
+                  / Notes         <--  DB Browser for SQLite             |
                                                                         |
                              reports/dashboards  <--  Power BI or Excel
 ```
@@ -39,7 +39,7 @@ Each is filled by the daily NF import, by the one-time backfill (the old
 | **Insurance Paid** | daily: CSV cell AR · backfill: "Amount Billed" |
 | **Payment Received** | backfill: "Payment Received $" (else you type it) |
 | **Expense Case Number** | you type it in (not backfilled) |
-| **Payment Due** | backfill: "Balance Due" (else you type it) |
+| **Payment Due** | **automatic** — always Insurance Paid − Payment Received (don't edit it) |
 | **Notes** | backfill: "Notes" (else you type it) |
 
 Re-importing the same file is always safe: prescriptions already loaded are
@@ -179,14 +179,18 @@ Setup done.
 The daily import fills **Name / Drug / Quantity / Insurance Paid** from the CSV
 (cells AJ / AK / AM / AR); the one-time backfill fills most of the rest from the
 "Daily Log" sheet. Any cell still blank — **Office, Billing Date, Payment
-Received, Expense Case Number, Payment Due, Notes** — you fill in here:
+Received, Expense Case Number, Notes** — you fill in here:
 
 1. Install **DB Browser for SQLite** (free) from **https://sqlitebrowser.org**.
 2. Open it → **Open Database** → pick `C:\PharmacyLogDB\pharmacy.db`.
 3. Go to the **Browse Data** tab → choose the **nf_insurance_log** table.
 4. Click a cell in **office / billing_date / payment_received /
-   expense_case_number / payment_due / notes** and type.
+   expense_case_number / notes** and type.
 5. Click **Write Changes** to save.
+
+**Payment Due** looks after itself: it's always **Insurance Paid − Payment
+Received**, and the database recalculates it the moment you change either of
+those (or an import does). Don't type into it.
 
 Because imports never overwrite existing rows, you can enrich a prescription
 today and re-run imports tomorrow without losing your edits.

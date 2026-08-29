@@ -46,13 +46,20 @@ now carries the billing columns too), or **by hand** later.
 | 6 | `insurance_paid` | Insurance Paid | NF CSV cell **AR** (text, e.g. `1,892.20`) | Amount Billed |
 | 7 | `payment_received` | Payment Received | — | Payment Received $ |
 | 8 | `expense_case_number` | Expense Case Number | — | — (Claim Number not mapped; hand-entered later) |
-| 9 | `payment_due` | Payment Due | — | Balance Due |
+| 9 | `payment_due` | Payment Due | **derived** | **derived** |
 | 10 | `notes` | Notes | — | Notes |
 
 A `—` means that source leaves the column blank; anything still blank after both
 runs is typed in later in DB Browser. The backfill also reads **RX Number** and
 **Filled Date** into the hidden de-dup key; if a backfill row has no RX Number it
 gets a content-hash key instead (see below) so it isn't lost.
+
+**`payment_due` is a derived column — don't hand-edit it.** It always equals
+`insurance_paid − payment_received`, formatted to 2 decimals. `read_backfill_csv()`
+computes it at load time, and two SQLite triggers keep it current: one fills it
+on insert, the other recomputes it whenever `insurance_paid` or `payment_received`
+changes — no matter what makes the change (a script, DB Browser, plain SQL). The
+"Balance Due" column in the backfill file is ignored.
 
 ### Hidden bookkeeping columns
 
@@ -179,7 +186,10 @@ Not meant to be edited. Provides:
   as blank, not NULL) plus the hidden bookkeeping columns and the
   `UNIQUE(rx_number, filled_date)` constraint. On an existing table it also
   `ALTER TABLE ... ADD COLUMN`s any `ALL_FIELDS` column that's missing, so
-  growing the model doesn't need a manual rebuild.
+  growing the model doesn't need a manual rebuild. Then it (re)installs the two
+  `payment_due` triggers (`_payment_due_ai` on insert, `_payment_due_au` on
+  update of `insurance_paid` / `payment_received`) and back-fills `payment_due`
+  for any pre-existing rows that were blank.
 - `extract_date_key()` — normalizes a date string to `YYYY-MM-DD` for a stable
   de-dup key; falls back to raw text on an unknown format so nothing is dropped.
 - `read_nf_ins_csv()` — parses the **daily** NF Insurance export: finds the
@@ -192,11 +202,12 @@ Not meant to be edited. Provides:
 - `read_backfill_csv()` — the **one-time** backfill reader. Reads the single
   "Daily Log" sheet CSV as a flat table: finds the header row via
   `BACKFILL_COLUMN_MAP`, returns one dict per data row with the mapped model
-  columns plus `rx_number` / `filled_date` for the de-dup key. Cleans numbers
-  (`$3,779.40` → `3779.4`), normalizes `filled_date` to `YYYY-MM-DD`, drops
-  unmapped headers (e.g. `Claim Number`). `_synthetic_rx()` supplies a
-  `BF-<hash>` `rx_number` (from `BACKFILL_HASH_FIELDS`) for any row with no real
-  RX Number, so it isn't collapsed into another keyless row.
+  columns plus `rx_number` / `filled_date` for the de-dup key. Treats literal
+  `NULL` / `N/A` cells as blank, cleans numbers (`$3,779.40` → `3779.4`),
+  normalizes `filled_date` to `YYYY-MM-DD`, computes `payment_due` when blank,
+  drops unmapped headers (`Claim Number`, `Balance Due`). `_synthetic_rx()`
+  supplies a `BF-<hash>` `rx_number` (from `BACKFILL_HASH_FIELDS`) for any row
+  with no real RX Number, so it isn't collapsed into another keyless row.
 - `insert_backfill()` — inserts historical rows (all model columns); on a row
   that already exists (same `rx_number` + `filled_date`) it fills only the
   columns that are still blank, so daily-import data and hand edits are never
@@ -224,9 +235,10 @@ export of the old workbook's "Daily Log" sheet, which now also carries the
 billing columns) via `read_backfill_csv()` + `insert_backfill()`. Maps
 **Name → name, Office → office, Drug → drug, Qty → quantity, Date Billing →
 billing_date, Amount Billed → insurance_paid, Payment Received $ →
-payment_received, Balance Due → payment_due, Notes → notes**, with **RX Number**
-and **Filled Date** as the hidden de-dup key. **Claim Number is not mapped**, so
-`expense_case_number` stays blank for hand entry.
+payment_received, Notes → notes**, with **RX Number** and **Filled Date** as the
+hidden de-dup key. **Claim Number** and **Balance Due** are not mapped —
+`expense_case_number` stays blank for hand entry, and `payment_due` is derived
+(`insurance_paid − payment_received`).
 
 Prints `Rows found / new / blank fields filled on existing rows`. Rows with no
 RX Number are keyed by a content hash (`BACKFILL_HASH_FIELDS`) so they still
@@ -313,7 +325,8 @@ prescriptions look merged, add `RX Number`s to those rows and re-run.
 1. Open **DB Browser for SQLite** → *Open Database* → `pharmacy.db`.
 2. *Browse Data* tab → `nf_insurance_log` table.
 3. Click a cell in `office` / `billing_date` / `payment_received` /
-   `expense_case_number` / `payment_due` / `notes` and type.
+   `expense_case_number` / `notes` and type. (Leave `payment_due` alone — it
+   recomputes itself from `insurance_paid − payment_received`.)
 4. **Write Changes** to save. Future imports never overwrite these.
 
 ### Reporting
@@ -347,8 +360,11 @@ Then **Task Scheduler → Create Basic Task → Daily**, *Start a program* →
   means re-running the daily import is a no-op for rows that already exist. The
   backfill is idempotent too — rows without an RX Number get a content-hash key
   so a re-run merges instead of duplicating.
-- **Manual edits are protected.** The daily import never writes the six
-  hand-entered columns; the backfill only fills ones that are still blank.
+- **Manual edits are protected.** The daily import never writes the hand-entered
+  columns; the backfill only fills ones that are still blank.
+- **`payment_due` stays honest.** SQLite triggers recompute it from
+  `insurance_paid − payment_received` on every relevant insert/update, so it
+  can't drift out of sync with the numbers it's derived from.
 - **Nothing is silently dropped.** Unparseable dates fall back to raw text; lines
   without the `Ins.Code:` marker or an Rx number are skipped; CSV files that fail
   to parse stay in `inbox/` with an error message.

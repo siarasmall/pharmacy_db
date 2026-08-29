@@ -9,7 +9,10 @@ in one flat table:
     Payment Received $, Balance Due, RX Number, Filled Date, Notes
 
 "Claim Number" is ignored on purpose, so Expense Case Number stays blank
-for hand entry. "RX Number" + "Filled Date" are the de-dup key.
+for hand entry. "Balance Due" is ignored too — Payment Due is derived as
+Amount Billed - Payment Received (and kept in sync afterwards by DB
+triggers). "RX Number" + "Filled Date" are the de-dup key; literal
+"NULL" in those cells counts as missing.
 
 Point BACKFILL_FILE in config.py at the export. Built-in Python only.
 Safe to re-run: existing rows only get their still-blank columns filled.
